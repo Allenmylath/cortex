@@ -1,0 +1,53 @@
+[package]
+name = "cortex"
+version = "0.1.0"
+authors = ["ALLEN GEORGE <allengeorgemylath@gmail.com>"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+dioxus = { version = "0.7.1", features = ["router", "fullstack"] }
+dioxus-fullstack = { version = "0.7.9", features = ["ws"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+sqlx = { version = "0.8", features = ["runtime-tokio-native-tls", "postgres", "macros"] }
+tokio = { version = "1", features = ["full"] }
+dotenvy = "0.15"
+rustvani = { version = "0.1.5", features = ["vad-silero"] }
+axum = { version = "0.7", features = ["ws"] }
+tower-http = { version = "0.5", features = ["cors"] }
+async-trait = "0.1"
+tracing = "0.1"
+bytes = "1"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = { version = "0.3", features = [
+    "AudioBuffer", "AudioBufferSourceNode",
+    "AudioContext", "AudioContextOptions",
+    "AudioDestinationNode", "AudioNode",
+    "AudioProcessingEvent", "BaseAudioContext",
+    "BinaryType", "CloseEvent", "ErrorEvent",
+    "MediaDevices", "MediaStream",
+    "MediaStreamAudioSourceNode", "MediaStreamConstraints", "MediaStreamTrack",
+    "MessageEvent", "Navigator",
+    "ScriptProcessorNode",
+    "WebSocket", "Window",
+] }
+js-sys = "0.3"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+
+
+[features]
+default = ["web"]
+# The feature that are only required for the web = ["dioxus/web"] build target should be optional and only enabled in the web = ["dioxus/web"] feature
+web = ["dioxus/web"]
+# The feature that are only required for the desktop = ["dioxus/desktop"] build target should be optional and only enabled in the desktop = ["dioxus/desktop"] feature
+desktop = ["dioxus/desktop"]
+# The feature that are only required for the mobile = ["dioxus/mobile"] build target should be optional and only enabled in the mobile = ["dioxus/mobile"] feature
+mobile = ["dioxus/mobile"]
+# The feature that are only required for the server = ["dioxus/server"] build target should be optional and only enabled in the server = ["dioxus/server"] feature
+server = ["dioxus/server"]
