@@ -10,6 +10,7 @@ pub fn VoicePage() -> Element {
     let pipeline = use_pipeline();
     use_context_provider(|| pipeline);
     let mut show_panel = use_signal(|| false);
+    let mut show_chat = use_signal(|| false);
 
     let page_bg = page_bg(&pipeline);
 
@@ -17,6 +18,17 @@ pub fn VoicePage() -> Element {
         div {
             class: "relative min-h-screen flex flex-col overflow-hidden",
             style: "{page_bg} transition: background 0.8s ease; font-family: system-ui;",
+
+            // Chat panel toggle
+            button {
+                class: "absolute top-4 left-4 z-20 px-3 py-1.5 rounded-full border border-white/15 text-white/70 text-xs cursor-pointer hover:bg-white/10 transition",
+                onclick: move |_| show_chat.set(!show_chat()),
+                if show_chat() { "Close chat" } else { "Chat" }
+            }
+
+            if show_chat() {
+                ChatPanel { on_close: move |_| show_chat.set(false) }
+            }
 
             // Info panel toggle
             button {
@@ -38,16 +50,8 @@ pub fn VoicePage() -> Element {
                 TranscriptBar {}
             }
 
-            // Message list
-            div { class: "w-full max-w-xl mx-auto px-4 mb-2 overflow-y-auto max-h-40",
-                MessageList {}
-            }
-
             // Function call chip
             FunctionCallChip {}
-
-            // Text input
-            ChatInput {}
 
             // Controls
             Controls {}
@@ -131,22 +135,21 @@ fn Orb() -> Element {
 #[component]
 fn TranscriptBar() -> Element {
     let p = use_context::<Pipeline>();
-    let transcript = p.transcript.read();
-    let activity = p.activity.read();
     let bot_text = p.bot_text.read();
+    let messages = p.messages.read();
 
-    let visible = !transcript.is_empty() || !bot_text.is_empty() || *activity == Activity::Listening;
-    let opacity = if visible { 1.0 } else { 0.0 };
-
-    let text = if !transcript.is_empty() {
-        transcript.clone()
-    } else if !bot_text.is_empty() {
+    let text = if !bot_text.is_empty() {
         bot_text.clone()
-    } else if *activity == Activity::Listening {
-        "Listening...".to_string()
     } else {
-        String::new()
+        messages
+            .iter()
+            .rev()
+            .find(|m| m.role == "assistant")
+            .map(|m| m.text.clone())
+            .unwrap_or_default()
     };
+
+    let opacity = if !text.is_empty() { 1.0 } else { 0.0 };
 
     rsx! {
         div {
@@ -165,8 +168,9 @@ fn MessageList() -> Element {
     let messages = p.messages.read();
 
     rsx! {
-        div { class: "flex flex-col gap-2 w-full",
-            for msg in messages.iter() {
+        div {
+            class: "flex flex-col-reverse gap-3 w-full h-full overflow-y-auto pr-1",
+            for msg in messages.iter().rev() {
                 MessageBubble {
                     role: msg.role.clone(),
                     text: msg.text.clone(),
@@ -180,20 +184,26 @@ fn MessageList() -> Element {
 #[component]
 fn MessageBubble(role: String, text: String, final_msg: bool) -> Element {
     let is_user = role == "user";
-    let align = if is_user { "self-end" } else { "self-start" };
-    let bg = if is_user { "rgba(100,180,255,0.25)" } else { "rgba(255,255,255,0.08)" };
+    let align = if is_user { "self-end items-end" } else { "self-start items-start" };
+    let bg = if is_user { "rgba(59,130,246,0.35)" } else { "rgba(255,255,255,0.08)" };
+    let label = if is_user { "You" } else { "Bot" };
+    let label_color = if is_user { "text-blue-300" } else { "text-gray-400" };
 
     rsx! {
         div {
-            class: "max-w-[85%] rounded-xl px-3 py-2 text-sm break-words {align}",
-            style: "background: {bg}; color: rgba(255,255,255,0.9);",
-            if !text.is_empty() {
-                "{text}"
-            } else if !final_msg {
-                span { class: "inline-flex gap-1 text-white/50",
-                    span { class: "animate-bounce", style: "animation-delay: 0ms;", "•" }
-                    span { class: "animate-bounce", style: "animation-delay: 150ms;", "•" }
-                    span { class: "animate-bounce", style: "animation-delay: 300ms;", "•" }
+            class: "flex flex-col max-w-[80%] {align} gap-0.5",
+            span { class: "text-[10px] {label_color} px-1", "{label}" }
+            div {
+                class: "rounded-xl px-3 py-2 text-sm break-words",
+                style: "background: {bg}; color: rgba(255,255,255,0.9);",
+                if !text.is_empty() {
+                    "{text}"
+                } else if !final_msg {
+                    span { class: "inline-flex gap-1 text-white/50",
+                        span { class: "animate-bounce", style: "animation-delay: 0ms;", "•" }
+                        span { class: "animate-bounce", style: "animation-delay: 150ms;", "•" }
+                        span { class: "animate-bounce", style: "animation-delay: 300ms;", "•" }
+                    }
                 }
             }
         }
@@ -239,38 +249,60 @@ fn friendly_label(name: &str) -> String {
     }.to_string()
 }
 
-// ── ChatInput ──
+// ── ChatPanel ──
 
 #[component]
-fn ChatInput() -> Element {
+fn ChatPanel(on_close: EventHandler<()>) -> Element {
     let p = use_context::<Pipeline>();
     let status = p.status.read();
     let mut input = use_signal(|| String::new());
-
     let is_connected = *status == "connected";
 
     rsx! {
-        form {
-            class: "w-full max-w-xl mx-auto px-4 mb-3 flex gap-2",
-            onsubmit: move |e| {
-                e.prevent_default();
-                if !input().trim().is_empty() {
-                    p.send_text(input());
-                    input.set(String::new());
+        aside {
+            class: "absolute left-0 top-0 z-10 h-full w-80 flex flex-col border-r border-white/10 text-white/80",
+            style: "background: rgba(10,10,15,0.92); backdrop-filter: blur(8px);",
+
+            // Header
+            div { class: "flex items-center justify-between px-4 py-3 border-b border-white/10 shrink-0",
+                h2 { class: "text-sm font-semibold", "Chat" }
+                button {
+                    class: "text-xs text-white/50 hover:text-white transition",
+                    onclick: move |_| on_close.call(()),
+                    "Close"
                 }
-            },
-            input {
-                class: "flex-1 rounded-full bg-white/10 border border-white/15 px-4 py-2 text-sm text-white placeholder-white/40 outline-none focus:border-white/30",
-                placeholder: if is_connected { "Type a message..." } else { "Connect to send messages" },
-                disabled: !is_connected,
-                value: "{input}",
-                oninput: move |e| input.set(e.value()),
             }
-            button {
-                class: "rounded-full bg-white/15 px-4 py-2 text-sm text-white hover:bg-white/25 disabled:opacity-30 disabled:cursor-not-allowed transition",
-                r#type: "submit",
-                disabled: !is_connected || input().trim().is_empty(),
-                "Send"
+
+            // Messages
+            div { class: "flex-1 overflow-y-auto px-4 py-3 min-h-0",
+                MessageList {}
+            }
+
+            // Input
+            div { class: "px-4 py-3 border-t border-white/10 shrink-0",
+                form {
+                    class: "flex gap-2",
+                    onsubmit: move |e| {
+                        e.prevent_default();
+                        if !input().trim().is_empty() {
+                            p.send_text(input());
+                            input.set(String::new());
+                        }
+                    },
+                    input {
+                        class: "flex-1 rounded-full bg-white/10 border border-white/15 px-4 py-2 text-sm text-white placeholder-white/40 outline-none focus:border-white/30",
+                        placeholder: if is_connected { "Type a message..." } else { "Connect to send messages" },
+                        disabled: !is_connected,
+                        value: "{input}",
+                        oninput: move |e| input.set(e.value()),
+                    }
+                    button {
+                        class: "rounded-full bg-white/15 px-4 py-2 text-sm text-white hover:bg-white/25 disabled:opacity-30 disabled:cursor-not-allowed transition",
+                        r#type: "submit",
+                        disabled: !is_connected || input().trim().is_empty(),
+                        "Send"
+                    }
+                }
             }
         }
     }
@@ -335,10 +367,9 @@ fn InfoPanel(on_close: EventHandler<()>) -> Element {
     let last_error = p.last_error.read();
     let events = p.events.read();
     let function_calls = p.function_calls.read();
-    let server_messages = p.server_messages.read();
+    let pipeline_texts = p.pipeline_texts.read();
 
     let last_func = function_calls.iter().rev().next();
-    let last_server = server_messages.iter().rev().next();
     let vad_color = if *vad_prob >= 0.7 { "rgb(100,220,140)" } else { "rgb(100,180,255)" };
     let vad_width = *vad_prob * 100.0;
 
@@ -414,13 +445,19 @@ fn InfoPanel(on_close: EventHandler<()>) -> Element {
                 }
             }
 
-            // Last server message
-            if let Some(sm) = last_server {
-                div { class: "px-4 py-3 border-b border-white/10 shrink-0",
-                    h3 { class: "text-[10px] uppercase tracking-widest text-white/40 mb-2", "Last Server Message" }
-                    pre { class: "max-h-32 overflow-auto rounded border border-white/10 p-2 text-[10px] break-all",
-                        style: "background: rgba(255,255,255,0.03); color: rgba(255,255,255,0.45);",
-                        "{sm.data}"
+            // Pipeline messages (raw JSON)
+            div { class: "flex-1 overflow-y-auto px-4 py-3 min-h-0",
+                h3 { class: "text-[10px] uppercase tracking-widest text-white/40 mb-2", "Pipeline Messages" }
+                if pipeline_texts.is_empty() {
+                    p { class: "text-xs", style: "color: rgba(255,255,255,0.3);", "No messages yet." }
+                } else {
+                    div { class: "flex flex-col gap-2",
+                        for text in pipeline_texts.iter().rev().take(100) {
+                            pre { class: "rounded border border-white/5 p-2 text-[10px] break-all",
+                                style: "background: rgba(255,255,255,0.03); color: rgba(255,255,255,0.5);",
+                                "{text}"
+                            }
+                        }
                     }
                 }
             }

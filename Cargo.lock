@@ -950,6 +950,7 @@ dependencies = [
  "dotenvy",
  "js-sys",
  "rustvani",
+ "rustvani-vad",
  "serde",
  "serde_json",
  "sqlx",
@@ -5451,6 +5452,15 @@ dependencies = [
  "tokio-util",
  "tower-http 0.5.2",
  "uuid",
+]
+
+[[package]]
+name = "rustvani-vad"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2cc210439bd4e6a512ea0bdd78e24cdcb69af13dfadc71fe7f07ad96e955303c"
+dependencies = [
+ "log",
 ]
 
 [[package]]

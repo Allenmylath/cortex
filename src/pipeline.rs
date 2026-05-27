@@ -28,11 +28,13 @@ use {
     rustvani::{
         SileroVadNative, VadParams,
         context::shared_context,
+        observer::BaseObserver,
         pipeline::{PipelineParams, PipelineTask},
         processors::{
             llm_assistant_aggregator::LLMAssistantAggregator,
             llm_user_aggregator::LLMUserAggregator,
         },
+        ravi::{RaviObserver, RaviObserverParams, RaviParams, RaviProcessor},
         system_clock,
         transport::{ChannelMessage, ChannelTransport, TransportParams},
     },
@@ -131,6 +133,11 @@ pub fn spawn_pipeline(config: &PipelineConfig) -> Result<PipelineHandle, String>
 
     let context = shared_context(Some(config.system_prompt.clone()));
 
+    let ravi = RaviProcessor::new(RaviParams {
+        context: Some(context.clone()),
+        ..RaviParams::default()
+    });
+
     let stt = SarvamSttHandler::new(SarvamSttConfig {
         api_key:  config.sarvam_api_key.clone(),
         model:    config.stt_model.clone(),
@@ -157,9 +164,12 @@ pub fn spawn_pipeline(config: &PipelineConfig) -> Result<PipelineHandle, String>
     .map_err(|e| format!("TTS init: {e}"))?
     .into_processor();
 
+    let observer = RaviProcessor::create_observer(&ravi, RaviObserverParams::default());
+
     let task = PipelineTask::new(
         vec![
             transport.input(),
+            ravi,
             stt,
             user_agg,
             llm,
@@ -178,7 +188,7 @@ pub fn spawn_pipeline(config: &PipelineConfig) -> Result<PipelineHandle, String>
     let rt = MAIN_RT.get().expect("MAIN_RT not initialised — set it in main() before dioxus::launch");
 
     rt.spawn(async move {
-        if let Err(e) = task.run(system_clock(), None).await {
+        if let Err(e) = task.run(system_clock(), Some(Arc::new(observer) as Arc<dyn BaseObserver>)).await {
             tracing::error!("[pipeline] error: {e}");
         }
         tracing::info!("[pipeline] stopped");
@@ -257,15 +267,9 @@ async fn run_pipeline_ws(options: WebSocketOptions) -> Result<Websocket> {
                                     .await;
                             }
                             Ok(Message::Text(text)) => {
-                                if is_client_interruption(&text) {
-                                    let _ = handle.incoming_tx
-                                        .send(ChannelMessage::Interruption)
-                                        .await;
-                                } else {
-                                    let _ = handle.incoming_tx
-                                        .send(ChannelMessage::Text(text))
-                                        .await;
-                                }
+                                let _ = handle.incoming_tx
+                                    .send(ChannelMessage::Text(text))
+                                    .await;
                             }
                             Ok(Message::Ping(_) | Message::Pong(_)) => {}
                             Ok(Message::Close { .. }) | Err(_) => break,
@@ -319,7 +323,4 @@ async fn run_pipeline_ws(options: WebSocketOptions) -> Result<Websocket> {
 // Helpers (server only)
 // ---------------------------------------------------------------------------
 
-#[cfg(all(not(target_arch = "wasm32"), feature = "server"))]
-fn is_client_interruption(text: &str) -> bool {
-    text.contains("client_interruption")
-}
+
