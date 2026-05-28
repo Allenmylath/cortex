@@ -5422,9 +5422,9 @@ dependencies = [
 
 [[package]]
 name = "rustvani"
-version = "0.1.5"
+version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3535e2ee8d301738b3162c797921736d75944acbdc3e223f7a002201ea8736fc"
+checksum = "940cfbb8cee986bf58951275f5b5926a2dd7b70f1c8cd579f3a923cd0d674748"
 dependencies = [
  "async-recursion",
  "async-trait",

@@ -71,24 +71,38 @@ pub async fn start_mic(mut pipeline: Pipeline) -> Result<(), JsValue> {
 
             if let Some((state, confidence)) = vad.process(&bytes) {
                 pipeline.vad_prob.set(confidence);
+                // Drain the speaker buffer as soon as Silero is confident,
+                // before the state machine finishes its onset hysteresis.
+                if confidence > 0.5 {
+                    speaker_clear();
+                }
                 match state {
                     VadState::Speaking => {
-                        pipeline.user_speaking.set(true);
-                        pipeline.activity.set(Activity::Listening);
-                        pipeline.bot_text.set(String::new());
-                        pipeline.is_bot_speaking.set(false);
-                        log_event(&mut pipeline, "user-started-speaking", Some("client-vad"));
-                        speaker_clear();
-                        let ws = pipeline.ws;
-                        spawn_local(async move {
-                            let _ = ws.send_raw(Message::Text(
-                                r#"{"type":"client_interruption"}"#.into(),
-                            )).await.ok();
-                        });
+                        if !*pipeline.user_speaking.read() {
+                            pipeline.user_speaking.set(true);
+                            pipeline.is_bot_speaking.set(false);
+                            pipeline.activity.set(Activity::Listening);
+                            pipeline.bot_text.set(String::new());
+                            let ws = pipeline.ws;
+                            spawn_local(async move {
+                                let _ = ws.send_raw(Message::Text(
+                                    r#"{"type":"client_vad_start"}"#.into(),
+                                )).await.ok();
+                            });
+                            log_event(&mut pipeline, "user-started-speaking", Some("client-vad"));
+                        }
                     }
                     VadState::Quiet => {
-                        pipeline.user_speaking.set(false);
-                        log_event(&mut pipeline, "user-stopped-speaking", Some("client-vad"));
+                        if *pipeline.user_speaking.read() {
+                            pipeline.user_speaking.set(false);
+                            let ws = pipeline.ws;
+                            spawn_local(async move {
+                                let _ = ws.send_raw(Message::Text(
+                                    r#"{"type":"client_vad_stop"}"#.into(),
+                                )).await.ok();
+                            });
+                            log_event(&mut pipeline, "user-stopped-speaking", Some("client-vad"));
+                        }
                     }
                     _ => {}
                 }

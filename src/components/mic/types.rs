@@ -86,10 +86,13 @@ impl Pipeline {
         });
     }
 
-    pub fn interrupt(self) {
+    pub fn interrupt(mut self) {
+        self.user_speaking.set(true);
+        self.is_bot_speaking.set(false);
+        self.activity.set(Activity::Listening);
+        self.bot_text.set(String::new());
         #[cfg(target_arch = "wasm32")]
         super::playback::speaker_clear();
-
         let ws = self.ws;
         spawn(async move {
             let _ = ws.send_raw(Message::Text(

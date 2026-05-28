@@ -267,9 +267,22 @@ async fn run_pipeline_ws(options: WebSocketOptions) -> Result<Websocket> {
                                     .await;
                             }
                             Ok(Message::Text(text)) => {
-                                let _ = handle.incoming_tx
-                                    .send(ChannelMessage::Text(text))
-                                    .await;
+                                let msg = if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+                                    match v.get("type").and_then(|t| t.as_str()) {
+                                        Some("client_vad_start") => {
+                                            tracing::info!("bridge: client_vad_start");
+                                            ChannelMessage::ClientVadStart(0.0)
+                                        }
+                                        Some("client_vad_stop") => {
+                                            tracing::info!("bridge: client_vad_stop");
+                                            ChannelMessage::ClientVadStop(0.0)
+                                        }
+                                        _ => ChannelMessage::Text(text),
+                                    }
+                                } else {
+                                    ChannelMessage::Text(text)
+                                };
+                                let _ = handle.incoming_tx.send(msg).await;
                             }
                             Ok(Message::Ping(_) | Message::Pong(_)) => {}
                             Ok(Message::Close { .. }) | Err(_) => break,
@@ -308,6 +321,8 @@ async fn run_pipeline_ws(options: WebSocketOptions) -> Result<Websocket> {
                                     Message::Text(r#"{"type":"interruption"}"#.into())
                                 ).await;
                             }
+                            Some(ChannelMessage::ClientVadStart(_))
+                            | Some(ChannelMessage::ClientVadStop(_)) => {}
                             None => break,
                         }
                     }

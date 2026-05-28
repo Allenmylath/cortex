@@ -20,14 +20,20 @@ pub fn handle_ravi_event(text: &str, pipeline: &mut Pipeline) {
         if raw.get("type").and_then(|v| v.as_str()) == Some("interruption")
             && raw.get("label").is_none()
         {
-            pipeline.activity.set(Activity::Idle);
+            let was_bot_speaking = *pipeline.is_bot_speaking.read();
             pipeline.energy.set(0.0);
             pipeline.is_bot_speaking.set(false);
             pipeline.user_speaking.set(true);
+            pipeline.activity.set(Activity::Listening);
             pipeline.bot_text.set(String::new());
-            pipeline.interrupt_count.with_mut(|c| *c += 1);
             speaker_clear();
-            log_event(pipeline, "interrupt", Some("server"));
+            // Only count and log as a true interruption when the bot was actually speaking.
+            // VAD-onset interruptions where the bot was silent are covered by the
+            // user-started-speaking RAVI event that follows.
+            if was_bot_speaking {
+                pipeline.interrupt_count.with_mut(|c| *c += 1);
+                log_event(pipeline, "interrupt", Some("server"));
+            }
             return;
         }
     }
@@ -46,14 +52,12 @@ pub fn handle_ravi_event(text: &str, pipeline: &mut Pipeline) {
             log_event(pipeline, "bot-ready", None);
         }
         "user-started-speaking" => {
-            pipeline.user_speaking.set(true);
-            pipeline.activity.set(Activity::Listening);
-            pipeline.bot_text.set(String::new());
-            log_event(pipeline, "user-started-speaking", None);
+            // State is owned by the client VAD (capture.rs). Only log for observability.
+            log_event(pipeline, "user-started-speaking", Some("server"));
         }
         "user-stopped-speaking" => {
-            pipeline.user_speaking.set(false);
-            log_event(pipeline, "user-stopped-speaking", None);
+            // State is owned by the client VAD (capture.rs). Only log for observability.
+            log_event(pipeline, "user-stopped-speaking", Some("server"));
         }
         "user-transcription" => {
             if let Some(data) = envelope.data {
