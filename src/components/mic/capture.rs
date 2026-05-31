@@ -28,7 +28,11 @@ pub async fn start_mic(mut pipeline: Pipeline) -> Result<(), JsValue> {
     let media_devs = window.navigator().media_devices()?;
 
     let constraints = MediaStreamConstraints::new();
-    constraints.set_audio(&wasm_bindgen::JsValue::TRUE);
+    let audio = js_sys::Object::new();
+    js_sys::Reflect::set(&audio, &"echoCancellation".into(), &true.into()).unwrap();
+    js_sys::Reflect::set(&audio, &"noiseSuppression".into(), &true.into()).unwrap();
+    js_sys::Reflect::set(&audio, &"autoGainControl".into(), &true.into()).unwrap();
+    constraints.set_audio(&audio);
 
     let stream: web_sys::MediaStream =
         JsFuture::from(media_devs.get_user_media_with_constraints(&constraints)?)

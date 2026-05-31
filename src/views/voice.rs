@@ -369,6 +369,8 @@ fn InfoPanel(on_close: EventHandler<()>) -> Element {
     let function_calls = p.function_calls.read();
     let pipeline_texts = p.pipeline_texts.read();
 
+    let mut vad_only = use_signal(|| false);
+
     let last_func = function_calls.iter().rev().next();
     let vad_color = if *vad_prob >= 0.7 { "rgb(100,220,140)" } else { "rgb(100,180,255)" };
     let vad_width = *vad_prob * 100.0;
@@ -464,12 +466,32 @@ fn InfoPanel(on_close: EventHandler<()>) -> Element {
 
             // Event log
             div { class: "flex-1 overflow-y-auto px-4 py-3 min-h-0",
-                h3 { class: "text-[10px] uppercase tracking-widest text-white/40 mb-2", "Event Log" }
+                div { class: "flex items-center justify-between mb-2",
+                    h3 { class: "text-[10px] uppercase tracking-widest text-white/40", "Event Log" }
+                    button {
+                        class: "text-[10px] px-2 py-0.5 rounded-full border cursor-pointer transition",
+                        style: if vad_only() {
+                            "background: rgba(100,220,140,0.2); border-color: rgba(100,220,140,0.4); color: rgb(100,220,140);"
+                        } else {
+                            "background: transparent; border-color: rgba(255,255,255,0.15); color: rgba(255,255,255,0.4);"
+                        },
+                        onclick: move |_| vad_only.set(!vad_only()),
+                        "VAD only"
+                    }
+                }
                 if events.is_empty() {
                     p { class: "text-xs", style: "color: rgba(255,255,255,0.3);", "No activity yet." }
                 } else {
                     div { class: "flex flex-col gap-1",
-                        for e in events.iter().rev().take(50) {
+                        for e in events.iter().rev()
+                            .filter(|e| {
+                                if !vad_only() { return true; }
+                                matches!(e.event_type.as_str(),
+                                    "user-started-speaking" | "user-stopped-speaking" | "interrupt"
+                                )
+                            })
+                            .take(50)
+                        {
                             div { class: "rounded border border-white/5 px-2 py-1 text-[11px]",
                                 style: "background: rgba(255,255,255,0.03);",
                                 div { class: "flex justify-between gap-2",

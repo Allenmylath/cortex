@@ -41,7 +41,8 @@ use {
     rustvani::services::{
         DeepgramTtsConfig, DeepgramTtsHandler,
         OpenAILLMConfig, OpenAILLMHandler,
-        SarvamSttConfig, SarvamSttHandler,
+        SixtyDbSttConfig, SixtyDbSttHandler,
+
     },
 };
 
@@ -54,12 +55,10 @@ use {
 #[cfg(all(not(target_arch = "wasm32"), feature = "server"))]
 #[derive(Clone)]
 pub struct PipelineConfig {
-    pub sarvam_api_key:   String,
+    pub sixtydb_api_key:  String,
     pub openai_api_key:   String,
     pub deepgram_api_key: String,
     pub system_prompt:    String,
-    pub stt_model:        String,
-    pub stt_language:     String,
     pub llm_model:        String,
     pub sample_rate_in:   u32,
     pub sample_rate_out:  u32,
@@ -71,14 +70,12 @@ impl PipelineConfig {
     /// Panics on missing keys — call at startup, not per-request.
     pub fn from_env() -> Self {
         Self {
-            sarvam_api_key:   std::env::var("SARVAM_API_KEY").expect("SARVAM_API_KEY"),
+            sixtydb_api_key:  std::env::var("SIXTYDB_API_KEY").expect("SIXTYDB_API_KEY"),
             openai_api_key:   std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY"),
             deepgram_api_key: std::env::var("DEEPGRAM_API_KEY").expect("DEEPGRAM_API_KEY"),
             system_prompt:    std::env::var("SYSTEM_PROMPT").unwrap_or_else(|_|
                 "You are a helpful voice assistant. Keep answers concise.".into()
             ),
-            stt_model:        "saaras:v3".into(),
-            stt_language:     "en-IN".into(),
             llm_model:        "gpt-4o-mini".into(),
             sample_rate_in:   16_000,
             sample_rate_out:  24_000,
@@ -138,12 +135,11 @@ pub fn spawn_pipeline(config: &PipelineConfig) -> Result<PipelineHandle, String>
         ..RaviParams::default()
     });
 
-    let stt = SarvamSttHandler::new(SarvamSttConfig {
-        api_key:  config.sarvam_api_key.clone(),
-        model:    config.stt_model.clone(),
-        language: Some(config.stt_language.clone()),
-        mode:     Some("transcribe".into()),
-        ..SarvamSttConfig::default()
+    let stt = SixtyDbSttHandler::new(SixtyDbSttConfig {
+        api_key: config.sixtydb_api_key.clone(),
+        languages: vec!["en".to_string()],
+        continuous_mode: true,
+        ..Default::default()
     })
     .into_processor();
 

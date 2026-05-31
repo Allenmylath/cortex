@@ -17,7 +17,9 @@ pub struct Property {
 }
 
 #[post("/api/properties/list")]
+#[tracing::instrument]
 pub async fn get_properties() -> Result<Vec<Property>, ServerFnError> {
+    tracing::info!("fetching property list");
     use sqlx::Row;
     let pool = crate::db::pool().await;
 
@@ -31,7 +33,8 @@ pub async fn get_properties() -> Result<Vec<Property>, ServerFnError> {
     .await
     .map_err(|e| ServerFnError::new(e.to_string()))?;
 
-    let props = rows
+    tracing::debug!("fetched {} property rows", rows.len());
+    let props: Vec<Property> = rows
         .iter()
         .map(|r| Property {
             id: r.get("id"),
@@ -48,10 +51,12 @@ pub async fn get_properties() -> Result<Vec<Property>, ServerFnError> {
         })
         .collect();
 
+    tracing::info!("returning {} properties", props.len());
     Ok(props)
 }
 
 #[post("/api/properties/create")]
+#[tracing::instrument(skip(address, city, property_type, description))]
 pub async fn create_property(
     address: String,
     city: String,
@@ -62,6 +67,7 @@ pub async fn create_property(
     property_type: String,
     description: String,
 ) -> Result<(), ServerFnError> {
+    tracing::info!("creating new property");
     let pool = crate::db::pool().await;
 
     let desc_val = if description.trim().is_empty() {
@@ -89,7 +95,9 @@ pub async fn create_property(
 }
 
 #[post("/api/properties/delete")]
+#[tracing::instrument(skip(id))]
 pub async fn delete_property(id: String) -> Result<(), ServerFnError> {
+    tracing::info!("deleting property");
     let pool = crate::db::pool().await;
 
     sqlx::query("DELETE FROM properties WHERE id = $1::uuid")
@@ -98,5 +106,6 @@ pub async fn delete_property(id: String) -> Result<(), ServerFnError> {
         .await
         .map_err(|e| ServerFnError::new(e.to_string()))?;
 
+    tracing::info!("property created successfully");
     Ok(())
 }

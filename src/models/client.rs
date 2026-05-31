@@ -16,7 +16,9 @@ pub struct Client {
 }
 
 #[post("/api/clients/list")]
+#[tracing::instrument]
 pub async fn get_clients() -> Result<Vec<Client>, ServerFnError> {
+    tracing::info!("fetching client list");
     use sqlx::Row;
     let pool = crate::db::pool().await;
 
@@ -30,7 +32,8 @@ pub async fn get_clients() -> Result<Vec<Client>, ServerFnError> {
     .await
     .map_err(|e| ServerFnError::new(e.to_string()))?;
 
-    let clients = rows
+    tracing::debug!("fetched {} client rows", rows.len());
+    let clients: Vec<Client> = rows
         .iter()
         .map(|r| Client {
             id: r.get("id"),
@@ -46,10 +49,12 @@ pub async fn get_clients() -> Result<Vec<Client>, ServerFnError> {
         })
         .collect();
 
+    tracing::info!("returning {} clients", clients.len());
     Ok(clients)
 }
 
 #[post("/api/clients/create")]
+#[tracing::instrument(skip(name, email, phone, preferred_areas, notes))]
 pub async fn create_client(
     name: String,
     email: String,
@@ -59,6 +64,7 @@ pub async fn create_client(
     preferred_areas: String,
     notes: String,
 ) -> Result<(), ServerFnError> {
+    tracing::info!("creating new client");
     let pool = crate::db::pool().await;
 
     let phone_val = if phone.trim().is_empty() {
@@ -95,7 +101,9 @@ pub async fn create_client(
 }
 
 #[post("/api/clients/delete")]
+#[tracing::instrument(skip(id))]
 pub async fn delete_client(id: String) -> Result<(), ServerFnError> {
+    tracing::info!("deleting client");
     let pool = crate::db::pool().await;
 
     sqlx::query("DELETE FROM clients WHERE id = $1::uuid")
@@ -104,5 +112,6 @@ pub async fn delete_client(id: String) -> Result<(), ServerFnError> {
         .await
         .map_err(|e| ServerFnError::new(e.to_string()))?;
 
+    tracing::info!("client created successfully");
     Ok(())
 }

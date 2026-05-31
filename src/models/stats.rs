@@ -10,7 +10,9 @@ pub struct DashboardStats {
 }
 
 #[post("/api/stats")]
+#[tracing::instrument]
 pub async fn get_dashboard_stats() -> Result<DashboardStats, ServerFnError> {
+    tracing::info!("fetching dashboard stats");
     use sqlx::Row;
     let pool = crate::db::pool().await;
 

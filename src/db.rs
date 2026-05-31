@@ -1,21 +1,27 @@
 use tokio::sync::OnceCell;
+use tracing::info;
 
 static POOL: OnceCell<sqlx::PgPool> = OnceCell::const_new();
 
+#[tracing::instrument]
 pub async fn pool() -> &'static sqlx::PgPool {
     POOL.get_or_init(|| async {
         dotenvy::dotenv().ok();
         let url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+        info!("connecting to database");
         let pool = sqlx::PgPool::connect(&url)
             .await
             .expect("Failed to connect to Neon Postgres");
+        info!("database connected");
         init_tables(&pool).await;
         pool
     })
     .await
 }
 
+#[tracing::instrument(skip(pool))]
 async fn init_tables(pool: &sqlx::PgPool) {
+    info!("initializing database tables");
     sqlx::query(
         r#"CREATE TABLE IF NOT EXISTS clients (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

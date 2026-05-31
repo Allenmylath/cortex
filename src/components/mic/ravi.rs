@@ -23,13 +23,12 @@ pub fn handle_ravi_event(text: &str, pipeline: &mut Pipeline) {
             let was_bot_speaking = *pipeline.is_bot_speaking.read();
             pipeline.energy.set(0.0);
             pipeline.is_bot_speaking.set(false);
-            pipeline.user_speaking.set(true);
-            pipeline.activity.set(Activity::Listening);
+            // Do NOT set user_speaking here — the client VAD in capture.rs
+            // is the sole owner of that flag.  Setting it here races with
+            // the VAD state machine and prevents user-started-speaking from
+            // ever being logged.
             pipeline.bot_text.set(String::new());
             speaker_clear();
-            // Only count and log as a true interruption when the bot was actually speaking.
-            // VAD-onset interruptions where the bot was silent are covered by the
-            // user-started-speaking RAVI event that follows.
             if was_bot_speaking {
                 pipeline.interrupt_count.with_mut(|c| *c += 1);
                 log_event(pipeline, "interrupt", Some("server"));
