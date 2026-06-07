@@ -1,10 +1,34 @@
+/// playback.rs
+///
+/// Changes from the previous version
+/// ───────────────────────────────────────────────────────────────────────────
+/// 1. The `AudioContext` is now created at **16 000 Hz** (same as the capture
+///    path) so both mic and speaker share a single context.  The incoming TTS
+///    audio (24 kHz i16-LE from the server) is resampled to 16 kHz in
+///    `push()` using linear interpolation before scheduling.
+///
+/// 2. `shared_context()` is a new public function that hands the same
+///    `AudioContext` to `capture.rs`.  This makes the browser's built-in AEC
+///    aware of the playback signal, because AEC only works when mic and
+///    speaker live in the same Web Audio graph.
+///
+/// 3. `init_speaker` now returns the shared context via `Ok(AudioContext)` so
+///    `client.rs` / `capture.rs` can receive it without an extra global.
+///
+/// Everything else (jitter buffer, clear, close, rms_energy) is unchanged.
+
 use std::cell::RefCell;
 use dioxus::prelude::*;
-use web_sys::{AudioBuffer, AudioBufferSourceNode, AudioContext, GainNode};
+use web_sys::{AudioBuffer, AudioBufferSourceNode, AudioContext, AudioContextOptions, GainNode};
 
 const IGNORE_AFTER_INTERRUPT_MS: f64 = 150.0;
 const JITTER_BUFFER_MS:          f64 = 80.0;
 const JITTER_BUFFER_MAX_WAIT_MS: f64 = 150.0;
+
+/// Sample rate shared by both the mic capture and the speaker.
+pub const SHARED_SAMPLE_RATE: f32 = 16_000.0;
+/// TTS audio from the server arrives at this rate.
+const SERVER_TTS_RATE: f32 = 24_000.0;
 
 // ── Speaker ──────────────────────────────────────────────────────────────────
 
@@ -12,12 +36,8 @@ pub struct Speaker {
     ctx:           AudioContext,
     gain:          GainNode,
     chain_end:     f64,
-    /// All source nodes that have been started but not yet stopped.
-    /// Pruned when the queue drains; stopped immediately on `clear`.
     active_srcs:   Vec<AudioBufferSourceNode>,
-    /// wall-clock ms of last `clear()` call; guards the discard window.
     cleared_at:    f64,
-    /// True while accumulating the jitter buffer for a new turn.
     priming:       bool,
     pending:       Vec<AudioBuffer>,
     pending_ms:    f64,
@@ -27,10 +47,18 @@ pub struct Speaker {
 
 impl Speaker {
     fn new(buffered_ms: Signal<u32>) -> Result<Self, wasm_bindgen::JsValue> {
-        let ctx  = AudioContext::new()?;
+        // ── Shared 16 kHz context ────────────────────────────────────────────
+        // Using the same AudioContext for both capture and playback is the
+        // prerequisite for the browser's echo-cancellation to see the bot
+        // audio as a reference signal.
+        let opts = AudioContextOptions::new();
+        opts.set_sample_rate(SHARED_SAMPLE_RATE);
+        let ctx = AudioContext::new_with_context_options(&opts)?;
+
         let gain = ctx.create_gain()?;
         gain.gain().set_value(1.0);
         gain.connect_with_audio_node(&ctx.destination())?;
+
         Ok(Self {
             ctx,
             gain,
@@ -45,40 +73,53 @@ impl Speaker {
         })
     }
 
-    /// Append a 24 kHz mono i16-LE chunk to the playback queue.
+    /// Append a server TTS chunk (24 kHz mono i16-LE) to the playback queue.
+    /// The chunk is resampled to SHARED_SAMPLE_RATE before scheduling.
     pub fn push(&mut self, bytes: &[u8]) {
         let n = bytes.len() / 2;
         if n == 0 { return; }
 
-        // Post-interrupt discard window — drop audio that arrived before the
-        // server had time to react to our interruption signal.
+        // Post-interrupt discard window.
         if js_sys::Date::now() - self.cleared_at < IGNORE_AFTER_INTERRUPT_MS {
             return;
         }
 
-        let f32s: Vec<f32> = bytes
+        // Decode i16-LE → f32
+        let src_f32: Vec<f32> = bytes
             .chunks_exact(2)
             .map(|c| i16::from_le_bytes([c[0], c[1]]) as f32 / 32_768.0)
             .collect();
 
-        let Ok(buf) = self.ctx.create_buffer(1, n as u32, 24_000.0) else { return };
-        buf.copy_to_channel(&f32s, 0).ok();
+        // Linear-interpolation resample 24 kHz → 16 kHz
+        let ratio      = SERVER_TTS_RATE / SHARED_SAMPLE_RATE;   // 1.5
+        let out_len    = ((n as f32) / ratio).ceil() as usize;
+        let mut resampled = Vec::with_capacity(out_len);
+        for i in 0..out_len {
+            let pos = i as f32 * ratio;
+            let lo  = pos.floor() as usize;
+            let hi  = (lo + 1).min(n - 1);
+            let t   = pos - lo as f32;
+            resampled.push(src_f32[lo] * (1.0 - t) + src_f32[hi] * t);
+        }
+
+        let Ok(buf) = self.ctx.create_buffer(
+            1, resampled.len() as u32, SHARED_SAMPLE_RATE,
+        ) else { return };
+        buf.copy_to_channel(&resampled, 0).ok();
 
         let now = self.ctx.current_time();
 
-        // Re-enter priming when the previous turn's queue has drained.
+        // Re-enter priming when previous turn's queue has drained.
         if !self.priming && now >= self.chain_end {
             self.active_srcs.clear();
-            self.priming      = true;
-            self.pending      = Vec::new();
-            self.pending_ms   = 0.0;
+            self.priming       = true;
+            self.pending       = Vec::new();
+            self.pending_ms    = 0.0;
             self.prime_started = Some(now);
         }
 
         if self.priming {
-            if self.prime_started.is_none() {
-                self.prime_started = Some(now);
-            }
+            if self.prime_started.is_none() { self.prime_started = Some(now); }
             self.pending_ms += buf.duration() * 1000.0;
             self.pending.push(buf);
             let elapsed = (now - self.prime_started.unwrap()) * 1000.0;
@@ -116,11 +157,8 @@ impl Speaker {
         self.buffered_ms.set(((self.chain_end - now).max(0.0) * 1000.0) as u32);
     }
 
-    /// Stop all queued audio immediately and discard the queue.
     pub fn clear(&mut self) {
-        for src in self.active_srcs.drain(..) {
-            src.stop().ok();
-        }
+        for src in self.active_srcs.drain(..) { src.stop().ok(); }
         self.gain.gain().set_value(0.0);
         self.chain_end     = self.ctx.current_time();
         self.cleared_at    = js_sys::Date::now();
@@ -131,8 +169,12 @@ impl Speaker {
         self.buffered_ms.set(0);
     }
 
-    fn close(self) {
-        self.ctx.close().ok();
+    fn close(self) { self.ctx.close().ok(); }
+
+    /// Hand out a clone of the underlying AudioContext so that capture.rs
+    /// can attach the mic source to the same graph.
+    pub fn audio_context(&self) -> AudioContext {
+        self.ctx.clone()
     }
 }
 
@@ -142,10 +184,22 @@ thread_local! {
     static SPEAKER: RefCell<Option<Speaker>> = RefCell::new(None);
 }
 
+/// Initialise the speaker.  Must be called before `shared_context()`.
 pub fn init_speaker(buffered_ms: Signal<u32>) -> Result<(), wasm_bindgen::JsValue> {
     SPEAKER.with(|s| -> Result<(), wasm_bindgen::JsValue> {
         *s.borrow_mut() = Some(Speaker::new(buffered_ms)?);
         Ok(())
+    })
+}
+
+/// Return the shared `AudioContext` so capture.rs can attach to the same graph.
+/// Panics if called before `init_speaker`.
+pub fn shared_context() -> AudioContext {
+    SPEAKER.with(|s| {
+        s.borrow()
+         .as_ref()
+         .expect("init_speaker must be called before shared_context")
+         .audio_context()
     })
 }
 

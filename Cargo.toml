@@ -30,12 +30,14 @@ web-sys = { version = "0.3", features = [
     "AudioContext", "AudioContextOptions",
     "AudioDestinationNode", "AudioNode",
     "AudioParam", "GainNode",
+    "AudioWorklet", "AudioWorkletNode", "AudioWorkletNodeOptions",
+    "MessagePort",
     "AudioProcessingEvent", "BaseAudioContext",
-    "BinaryType", "CloseEvent", "ErrorEvent",
+    "BinaryType", "Blob", "BlobPropertyBag", "CloseEvent", "ErrorEvent",
     "MediaDevices", "MediaStream",
     "MediaStreamAudioSourceNode", "MediaStreamConstraints", "MediaStreamTrack",
     "MessageEvent", "Navigator",
-    "ScriptProcessorNode",
+    "ScriptProcessorNode", "Url",
     "WebSocket", "Window",
 ] }
 js-sys = "0.3"
